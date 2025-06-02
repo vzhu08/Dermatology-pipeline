@@ -1,6 +1,8 @@
+# main
+
 import os
 from src.extract_images import extract_images_from_pdf
-from src.filter_with_clip import filter_with_clip
+from src.filter_with_clip import filter_with_clip_two_label_lists
 #from src.analyze_skin import segment_skin, remove_lesions, compute_skin_lab
 
 def main():
@@ -9,24 +11,29 @@ def main():
     photos_dir = "data/only_photos"
     illus_dir = "data/only_illustrations"
     results_dir = "data/results"
+    os.makedirs(extracted_dir, exist_ok=True)
     os.makedirs(results_dir, exist_ok=True)
 
     # 1. Extract all extracted_images from PDF
-    # extract_images_from_pdf(pdf_path, extracted_dir)
+    #extract_images_from_pdf(pdf_path, extracted_dir)
 
     # 2. Filter extracted_images into photos vs. illustrations
+    photo_labels = [
+        "a photograph"
+    ]
 
-    # Adjust thresholds if needed
-    filter_with_clip(
-        input_folder=extracted_dir,
-        photo_folder=photos_dir,
-        illus_folder=illus_dir,
-        labels=[
-            "an image containing an unedited clinical photograph of a body, body part (hand, foot, leg, arm, face), or patch of skin containing human skin, possibly accompanied with a text description or diagram",
-            "only a hand‑drawn, schematic, or computer‑generated illustration from a medical textbook, possibly with accompanying text but without any real photographs",
-            "a page or portion of a page of a medical textbook containing only text, graphs, tables, and/or charts"
-        ],
-        margin=0.05
+    illus_labels = [
+        "only an illustration",
+        "only a portion of text",
+        "only a blank page"
+    ]
+
+    filter_with_clip_two_label_lists(
+        input_folder="data/extracted_images/bounding_boxes",
+        photo_folder="data/only_photos",
+        illus_folder="data/only_illustrations",
+        photo_labels=photo_labels,
+        illus_labels=illus_labels
     )
 
 
