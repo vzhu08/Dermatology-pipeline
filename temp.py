@@ -13,7 +13,7 @@ illus_labels = [
     "an portion of a textbook showing a chart"
 ]
 '''
-photo_labels = ["a photograph",
+'''photo_labels = ["a photograph",
                 "a photograph of a hand",
                 "a photograph of a finger",
                 "a photograph of an arm",
@@ -36,12 +36,22 @@ illus_labels = [
         "only a page with some text",
         "only a blank page"
         ]
-
+'''
 
 #photo_labels = ["a photograph of a body part", "a photograph of a person", "a photograph of a face"]
 #illus_labels = ["only an illustration", "only a chart", "only a portion of text", "only a blank page"]
 
-scores = get_image_label_similarities("data/extracted_images/bounding_boxes/page5_img2_box1.jpeg", photo_labels, illus_labels)
+photo_labels = [
+        "a photograph", "a photograph accompanied with a text description"
+    ]
+
+illus_labels = [
+        "only an illustration",
+        "only a portion of text",
+        "only a blank page"
+    ]
+
+scores = get_image_label_similarities("data/extracted_images/bounding_boxes/page33_img7_box1.jpeg", photo_labels, illus_labels)
 print("Photo‐label similarities:")
 for lbl, score in scores["photo"].items():
     print(f"{lbl:60} → {score:.4f}")
