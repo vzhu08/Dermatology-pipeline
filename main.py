@@ -2,38 +2,45 @@
 
 import os
 from src.extract_images import extract_images_from_pdf
-from src.filter_with_clip import filter_with_clip_two_label_lists
+from src.filter_with_clip import filter_with_clip
 #from src.analyze_skin import segment_skin, remove_lesions, compute_skin_lab
 
 def main():
-    pdf_path = r"data/textbook1.pdf"
+    east_path = "src/frozen_east_text_detection.pb"
+    pdf_path = "data/textbook1.pdf"
     extracted_dir = "data/extracted_images"
-    photos_dir = "data/only_photos"
-    illus_dir = "data/only_illustrations"
-    results_dir = "data/results"
+    sorted_images = "data/sorted_images"
     os.makedirs(extracted_dir, exist_ok=True)
-    os.makedirs(results_dir, exist_ok=True)
 
     # 1. Extract all extracted_images from PDF
-    #extract_images_from_pdf(pdf_path, extracted_dir)
+    #extract_images_from_pdf(pdf_path, extracted_dir, east_path, remove_text=True)
 
     # 2. Filter extracted_images into photos vs. illustrations
+
     photo_labels = [
-        "a photograph"
+        "a photograph",
+        "a high-resolution photo",
+        "a DSLR photo",
+        "a real-life photo",
+        "a photo taken with a camera",
+        "a snapshot"
     ]
 
     illus_labels = [
-        "only an illustration",
-        "only a portion of text",
-        "only a blank page"
+        "a drawing",
+        "digital art",
+        "a cartoon",
+        "an illustration",
+        "a portion of text",
+        "a blank page"
     ]
 
-    filter_with_clip_two_label_lists(
+    filter_with_clip(
         input_folder="data/extracted_images/bounding_boxes",
-        photo_folder="data/only_photos",
-        illus_folder="data/only_illustrations",
+        output_folder=sorted_images,
         photo_labels=photo_labels,
-        illus_labels=illus_labels
+        illus_labels=illus_labels,
+        max_workers=10
     )
 
 
