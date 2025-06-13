@@ -1,5 +1,4 @@
 # src/filter_with_clip.py
-
 import os
 import glob
 import math
@@ -29,27 +28,31 @@ def load_clip_model(device: str = None):
 
 def get_image_label_similarities(
     image_path: str,
-    photo_labels: list[str],
-    illus_labels: list[str]
+    categories: dict[str, list[str]]
 ) -> dict:
     """
-    Compute cosine similarities between a single image and two sets of text labels,
-    then classify as 'photo' or 'illus' based on mean scores.
+    Compute CLIP cosine similarities for a single image across multiple categories.
+    'categories' maps subfolder names to lists of label prompts.
 
-    Returns a dict:
+    Returns:
       {
-        "photo_scores": { label: score, ... },
-        "illus_scores": { label: score, ... },
-        "mean_photo": float,
-        "mean_illus": float,
-        "classification": "photo" or "illus"
+        "label_scores": { category: {label: score, ...}, ... },
+        "mean_scores":  { category: mean_score, ... },
+        "classification": category with highest mean score
       }
     """
-    # Load model and labels
+    # load model + tokenizer + processor
     model, tokenizer, image_processor, device = load_clip_model()
-    all_labels = photo_labels + illus_labels
 
-    # Embed labels
+    # flatten labels and track their category
+    all_labels = []
+    label_to_category = []
+    for category, labels in categories.items():
+        for label in labels:
+            all_labels.append(label)
+            label_to_category.append(category)
+
+    # embed all labels once
     text_inputs = tokenizer(all_labels, padding=True, return_tensors="pt").to(device)
     with torch.no_grad():
         text_embeds = model.get_text_features(
@@ -58,7 +61,7 @@ def get_image_label_similarities(
         )
         text_embeds = text_embeds / text_embeds.norm(p=2, dim=-1, keepdim=True)
 
-    # Load and embed the image
+    # load & embed image
     img = Image.open(image_path).convert("RGB")
     img_inputs = image_processor(images=img, return_tensors="pt").to(device)
     with torch.no_grad():
@@ -66,133 +69,64 @@ def get_image_label_similarities(
         img_feat = img_feat / img_feat.norm(p=2, dim=-1, keepdim=True)
         sims = (img_feat @ text_embeds.T).squeeze(0).cpu().numpy()
 
-    # Split scores
-    photo_scores = {photo_labels[i]: float(sims[i]) for i in range(len(photo_labels))}
-    illus_scores = {illus_labels[j]: float(sims[len(photo_labels) + j])
-                    for j in range(len(illus_labels))}
+    # collect per-category label scores and mean
+    label_scores = {}
+    mean_scores = {}
+    for category in categories:
+        scores = []
+        label_scores[category] = {}
+        for idx, label in enumerate(all_labels):
+            if label_to_category[idx] == category:
+                score = float(sims[idx])
+                label_scores[category][label] = score
+                scores.append(score)
+        mean_scores[category] = float(np.mean(scores)) if scores else float("-inf")
 
-    # Compute means and classification
-    mean_photo = np.mean(list(photo_scores.values())) if photo_scores else float("-inf")
-    mean_illus = np.mean(list(illus_scores.values())) if illus_scores else float("-inf")
-    classification = "photo" if mean_photo > mean_illus else "illus"
+    # pick highest mean
+    classification = max(mean_scores, key=mean_scores.get)
 
     return {
-        "photo_scores": photo_scores,
-        "illus_scores": illus_scores,
-        "mean_photo": mean_photo,
-        "mean_illus": mean_illus,
+        "label_scores": label_scores,
+        "mean_scores": mean_scores,
         "classification": classification
     }
-
-
-def is_photo_by_labels(
-    image_path: str,
-    model: CLIPModel,
-    tokenizer: CLIPTokenizer,
-    image_processor: CLIPImageProcessor,
-    device: str,
-    photo_labels: list[str],
-    illus_labels: list[str]
-) -> bool:
-    """
-    Return True if the image’s highest cosine score among photo_labels
-    exceeds the highest among illus_labels. Otherwise return False.
-    """
-    pil_image = Image.open(image_path).convert("RGB")
-    img_inputs = image_processor(images=pil_image, return_tensors="pt").to(device)
-
-    all_labels = photo_labels + illus_labels
-    text_inputs = tokenizer(all_labels, padding=True, return_tensors="pt").to(device)
-    with torch.no_grad():
-        outputs = model(
-            input_ids=text_inputs["input_ids"],
-            attention_mask=text_inputs["attention_mask"],
-            pixel_values=img_inputs["pixel_values"]
-        )
-        img_embeds = outputs.image_embeds / outputs.image_embeds.norm(p=2, dim=-1, keepdim=True)
-        text_embeds = outputs.text_embeds / outputs.text_embeds.norm(p=2, dim=-1, keepdim=True)
-        sims = (img_embeds @ text_embeds.T).squeeze(0).cpu().numpy()
-
-    num_photo = len(photo_labels)
-    max_photo = float(np.max(sims[:num_photo])) if num_photo > 0 else float("-inf")
-    max_illus = float(np.max(sims[num_photo:])) if illus_labels else float("-inf")
-
-    return max_photo > max_illus
-
-
-def _process_batch_thread(
-    batch_paths: list[str],
-    text_embeds: torch.Tensor,
-    all_labels: list[str],
-    photo_labels: list[str],
-    output_folder: str,
-    model: CLIPModel,
-    image_processor: CLIPImageProcessor,
-    device: str
-):
-    """
-    Worker thread: embed a batch of images, determine class by mean score,
-    and save into output_folder/photo/ or output_folder/illus/.
-    """
-    imgs, paths = [], []
-    for p in batch_paths:
-        try:
-            imgs.append(Image.open(p).convert("RGB"))
-            paths.append(p)
-        except:
-            continue
-    if not imgs:
-        return
-
-    inputs = image_processor(images=imgs, return_tensors="pt").to(device)
-    with torch.no_grad():
-        feats = model.get_image_features(pixel_values=inputs["pixel_values"])
-        feats = feats / feats.norm(p=2, dim=-1, keepdim=True)
-        sims = (feats @ text_embeds.T).cpu().numpy()
-
-    n_photo = len(photo_labels)
-    for i, img_path in enumerate(paths):
-        scores = sims[i]
-        mean_photo = scores[:n_photo].mean()
-        mean_illus = scores[n_photo:].mean()
-        cls = "photo" if mean_photo > mean_illus else "illus"
-        dest_dir = os.path.join(output_folder, cls)
-        try:
-            Image.open(img_path).save(os.path.join(dest_dir, os.path.basename(img_path)))
-        except:
-            pass
 
 
 def filter_with_clip(
     input_folder: str,
     output_folder: str,
-    photo_labels: list[str],
-    illus_labels: list[str],
+    categories: dict[str, list[str]],
+    use_mean: bool = False,
     batch_size: int = 32,
     max_workers: int = None
 ):
     """
-    Walk through all images in input_folder and classify each into
-    output_folder/photo/ or output_folder/illus/ based on mean CLIP scores,
-    processing batches in parallel threads.
+    Categorize all images in 'input_folder' into subfolders under 'output_folder' based on
+    CLIP similarities. 'categories' maps each subfolder name to a list of label prompts.
+    If use_mean is True, uses the mean score per category; otherwise picks the category
+    of the single highest-scoring label. Processes in parallel threads.
     """
-    # Prepare output folders
-    for cls in ("photo", "illus"):
-        cls_path = os.path.join(output_folder, cls)
-        if os.path.isdir(cls_path):
-            for fname in os.listdir(cls_path):
+    # create/clean category subfolders
+    for category in categories:
+        path = os.path.join(output_folder, category)
+        if os.path.isdir(path):
+            for f in os.listdir(path):
                 try:
-                    os.remove(os.path.join(cls_path, fname))
+                    os.remove(os.path.join(path, f))
                 except OSError:
                     pass
         else:
-            os.makedirs(cls_path, exist_ok=True)
+            os.makedirs(path, exist_ok=True)
 
-    # Load model + processor
+    # load model + embed labels
     model, tokenizer, image_processor, device = load_clip_model()
-    all_labels = photo_labels + illus_labels
+    all_labels = []
+    label_to_category = []
+    for category, labels in categories.items():
+        for label in labels:
+            all_labels.append(label)
+            label_to_category.append(category)
 
-    # Embed all labels once
     text_inputs = tokenizer(all_labels, padding=True, return_tensors="pt").to(device)
     with torch.no_grad():
         text_embeds = model.get_text_features(
@@ -201,25 +135,67 @@ def filter_with_clip(
         )
         text_embeds = text_embeds / text_embeds.norm(p=2, dim=-1, keepdim=True)
 
-    # Gather files and create batches
+    # prepare files & batches
     patterns = ["*.jpg", "*.jpeg", "*.png", "*.bmp"]
     files = []
     for pat in patterns:
-        files += glob.glob(os.path.join(input_folder, pat))
+        files.extend(glob.glob(os.path.join(input_folder, pat)))
     files.sort()
     batches = [files[i : i + batch_size] for i in range(0, len(files), batch_size)]
 
-    # Process in parallel threads
+    # precompute indices per category
+    category_to_indices: dict[str, list[int]] = {}
+    for category in categories:
+        category_to_indices[category] = [
+            i for i, cat in enumerate(label_to_category) if cat == category
+        ]
+
+    # thread worker
+    def _worker(batch_paths: list[str]):
+        imgs, paths = [], []
+        for p in batch_paths:
+            try:
+                imgs.append(Image.open(p).convert("RGB"))
+                paths.append(p)
+            except:
+                continue
+        if not imgs:
+            return
+
+        inputs = image_processor(images=imgs, return_tensors="pt").to(device)
+        with torch.no_grad():
+            feats = model.get_image_features(pixel_values=inputs["pixel_values"])
+            feats = feats / feats.norm(p=2, dim=-1, keepdim=True)
+            sims = (feats @ text_embeds.T).cpu().numpy()
+
+        for idx_img, img_path in enumerate(paths):
+            scores = sims[idx_img]
+            if use_mean:
+                # mean-based category
+                best_cat = None
+                best_score = float("-inf")
+                for cat, indices in category_to_indices.items():
+                    if not indices:
+                        continue
+                    mean_score = float(np.mean(scores[indices]))
+                    if mean_score > best_score:
+                        best_score = mean_score
+                        best_cat = cat
+            else:
+                # max-label-based category
+                best_label_idx = int(np.argmax(scores))
+                best_cat = label_to_category[best_label_idx]
+
+            dest = os.path.join(output_folder, best_cat, os.path.basename(img_path))
+            try:
+                Image.open(img_path).save(dest)
+            except:
+                pass
+
+    # parallel execution
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = []
-        for batch in batches:
-            futures.append(executor.submit(
-                _process_batch_thread,
-                batch, text_embeds, all_labels,
-                photo_labels, output_folder,
-                model, image_processor, device
-            ))
+        futures = [executor.submit(_worker, batch) for batch in batches]
         for fut in as_completed(futures):
             fut.result()
 
-    print(f"Done. Sorted into '{output_folder}/photo/' and '{output_folder}/illus/'.")
+    print(f"Done. Sorted images into subfolders of '{output_folder}' based on categories.")

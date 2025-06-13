@@ -1,22 +1,22 @@
 # main
 
 import os
+import torch
 from src.extract_images import extract_images_from_pdf
 from src.filter_with_clip import filter_with_clip
-#from src.analyze_skin import segment_skin, remove_lesions, compute_skin_lab
+
 
 def main():
-    east_path = "src/frozen_east_text_detection.pb"
     pdf_path = "data/textbook1.pdf"
     extracted_dir = "data/extracted_images"
     sorted_images = "data/sorted_images"
     os.makedirs(extracted_dir, exist_ok=True)
+    os.makedirs(sorted_images, exist_ok=True)
 
     # 1. Extract all extracted_images from PDF
-    #extract_images_from_pdf(pdf_path, extracted_dir, east_path, remove_text=True)
+    # extract_images_from_pdf(pdf_path=pdf_path, output_dir=extracted_dir, use_ocr=False)
 
     # 2. Filter extracted_images into photos vs. illustrations
-
     photo_labels = [
         "a photograph",
         "a high-resolution photo",
@@ -38,8 +38,53 @@ def main():
     filter_with_clip(
         input_folder="data/extracted_images/bounding_boxes",
         output_folder=sorted_images,
-        photo_labels=photo_labels,
-        illus_labels=illus_labels,
+        use_mean=True,
+        categories={
+        "photo": photo_labels,
+        "illus": illus_labels
+        },
+        max_workers=10
+    )
+
+    # 2. Filter photos into skin and no skin
+    skin_labels = [
+        "a human",
+        "human skin",
+        "a skin lesion",
+        "a skin condition",
+        "a leg",
+        "a foot",
+        "an arm",
+        "a hand",
+        "a patient's torso",
+        "a patient's back",
+        "a face",
+        "a mouth",
+        "a tongue",
+        "an ear",
+        "a nose",
+        "a finger"
+    ]
+
+    noskin_labels = [
+        "a microscopic photo",
+        "a micrograph",
+        "a biological cell",
+        "a group of cells",
+        "a molecule",
+        "medical equipment",
+        "a tool",
+        "a page with text",
+        "a blank page",
+    ]
+
+    filter_with_clip(
+        input_folder="data/sorted_images/photo",
+        output_folder=sorted_images,
+        categories={
+        "skin": skin_labels,
+        "no_skin": noskin_labels
+        },
         max_workers=10
     )
 

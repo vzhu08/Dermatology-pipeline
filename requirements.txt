@@ -1,6 +1,11 @@
+# requirements.txt
+
 PyMuPDF
 Pillow
 numpy
 opencv-python
 torch
 transformers
+paddlepaddle
+paddleocr
+layoutparser
